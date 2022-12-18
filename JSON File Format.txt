@@ -1,0 +1,18 @@
+bead count
+> int
+bead_voxel_count
+> (per bead) int
+created
+> string of current date & time
+data_type
+> “labeled”
+domain_size
+> 1 x 3 int array
+hip_file
+> string of microscope data filename
+voxel_count
+> int
+voxel_size
+> double
+bead_data
+> (per bead) int array

@@ -1,0 +1,4 @@
+* Enabled multiprocessing to speedup the process. (Run "segment3d_mp.py" to use multiprocessing.) Python 3.8+ is required. 
+* Fixed a mistake of merging seeds. 
+
+However, the fastest way to run multiple data or run using multiple parameters is making several copies of the main script and run them simultaneously in multiple terminals. 

@@ -1,6 +1,8 @@
 # 3D Particle Segmentation
 
-Automated segmentation of 3D particle/bead structures in microscopy images using Python and scikit-image watershed algorithm.
+Automated segmentation of 3D particle/bead structures in microscopy images using Python and scikit-image watershed algorithm. 
+
+The output is a JSON configured to work as an input file for [lovamap](https://github.com/seguralab/lovamap). Final analysis data can be found in [lovamap.com](https://lovamap.com).
 
 ## Environment Setup
 

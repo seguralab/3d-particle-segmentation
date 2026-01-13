@@ -186,7 +186,7 @@ For each input file, the script creates a folder `output/{filename}/` containing
 
 ## Function Reference
 
-All utility functions are in `segmentation_processing.py`:
+All processing functions and utilities are in `segmentation_processing.py`:
 
 ### `detect_input_type(filename)`
 Detects the input file type based on file extension.
@@ -204,6 +204,8 @@ Provides sensible default parameters for each input type.
 Executes the complete segmentation pipeline.
 - Performs all 10 steps of processing
 - Saves outputs to `output/{filename}/`
+
+Lower-level segmentation utilities are in utils.py
 
 ## Project Structure
 

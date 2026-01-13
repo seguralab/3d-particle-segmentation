@@ -219,10 +219,3 @@ Executes the complete segmentation pipeline.
 └── output/                     # Segmentation results saved here
     └── {filename}/            # Results organized by input file name
 ```
-
-## Example Data
-
-Original example images are available at:
-- **Confocal**: [iCloud link](https://www.icloud.com/attachment/?u=...)
-- **SCAPE**: `volumedata.mat`
-- **Results**: See `results/` folder for examples 

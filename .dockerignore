@@ -1,0 +1,11 @@
+.git
+__pycache__
+*.pyc
+input/
+output/
+venv/
+.env
+*.mat
+*.tif
+*.zip
+.DS_Store

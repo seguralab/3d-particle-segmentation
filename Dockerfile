@@ -22,5 +22,5 @@ RUN useradd --create-home appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
-# Default: run the main segmentation script
-ENTRYPOINT ["python", "segment3d_2.py"]
+# Default: run the Docker CLI entrypoint
+ENTRYPOINT ["python", "docker_entrypoint.py"]

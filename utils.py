@@ -31,7 +31,7 @@ def find_seeds(D, d_peak=np.inf, peak_prom=0):
             watershed seed, and its value will be the watershed label.
     '''
     # print('Select seeds:')
-    local_maxi_xyz = peak_local_max(D, threshold_abs=3, exclude_border=False, indices = True) # footprint = np.ones((3, 3)), 
+    local_maxi_xyz = peak_local_max(D, threshold_abs=3, exclude_border=False) # footprint = np.ones((3, 3)),
     # Coordinates of initial local maxima
     xc = local_maxi_xyz[:,0]
     yc = local_maxi_xyz[:,1]
@@ -290,7 +290,7 @@ def list_sparse(list_labels_2, shape):
     list_bead_voxel_count = []
     list_bead_data = []
     for label_2 in tqdm(list_labels_2):
-        label = label_2.A.reshape(shape)
+        label = label_2.toarray().reshape(shape)
         # convert 3D array to 1D index according to MATLAB order
         label_1d = label.transpose([2,1,0]).ravel()
         # locate the starting and ending points of the bead

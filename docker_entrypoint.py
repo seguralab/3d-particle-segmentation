@@ -13,8 +13,10 @@ from segmentation_processing import (
     detect_input_type,
     load_and_process_input,
     get_default_params,
+    validate_required_params,
     run_segmentation,
 )
+from resize_tif import get_pixel_and_z_dimensions
 
 
 def parse_args():
@@ -56,6 +58,10 @@ def parse_args():
     )
     parser.add_argument("--channel-num", type=int, help="Channel number (LIF files)")
     parser.add_argument("--example-frame", type=int, help="Z-slice for visualization")
+    parser.add_argument("--peak-prom", type=float, help="Peak prominence for seed detection (auto: radius/5)")
+    parser.add_argument("--d-peak", type=float, help="Min distance between peaks in voxels (auto: radius)")
+    parser.add_argument("--inten-max", type=float, help="Max intensity always foreground (auto: th*3.33)")
+    parser.add_argument("--th-relative", type=float, help="Relative brightness threshold (auto: th/3)")
 
     # Output options
     parser.add_argument(
@@ -107,24 +113,71 @@ def main():
         "crop_bool": args.crop_bool,
         "channel_num": args.channel_num,
         "example_frame": args.example_frame,
+        "peak_prom": args.peak_prom,
+        "d_peak": args.d_peak,
+        "inten_max": args.inten_max,
+        "th_relative": args.th_relative,
     }
     overrides = {k: v for k, v in override_map.items() if v is not None}
     if overrides:
         params.update(overrides)
         print(f"Applied overrides: {list(overrides.keys())}")
 
+    # Validate required parameters.
+    # For TIF files, attempt to read dx/dy/dz from metadata and include
+    # detected values in the error message so the calling API/frontend can
+    # present them for user confirmation.
+    try:
+        validate_required_params(params, input_type)
+    except ValueError as e:
+        detected = {}
+        if input_type == 'tif' and os.path.exists(filepath):
+            try:
+                meta_dx, meta_dy, meta_dz = get_pixel_and_z_dimensions(filepath)
+                if meta_dx is not None:
+                    detected['dx'] = meta_dx
+                if meta_dy is not None:
+                    detected['dy'] = meta_dy
+                if meta_dz is not None:
+                    detected['dz'] = meta_dz
+            except Exception:
+                pass  # metadata extraction failed, just show the error
+
+        print(f"Error: {e}", file=sys.stderr)
+        if detected:
+            print(f"\nDetected from TIF metadata: {detected}", file=sys.stderr)
+            print(
+                "Please confirm these values by passing them explicitly "
+                "(e.g. --dx {dx} --dy {dy} --dz {dz}).".format(
+                    dx=detected.get('dx', '?'),
+                    dy=detected.get('dy', '?'),
+                    dz=detected.get('dz', '?'),
+                ),
+                file=sys.stderr,
+            )
+        print(
+            "\nFor TIF/LIF files, you must provide: "
+            "--dx, --dy, --dz, --fluorescent-label, --radius-um",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Load image
     print(f"Loading: {filepath}")
     img3d = load_and_process_input(filepath, input_type, params)
-    print(f"Image shape: {img3d.shape}")
+    raw_shape = params.get('raw_shape', img3d.shape)
+    print(f"Image loaded. Raw: {raw_shape[0]}x{raw_shape[1]} px, {raw_shape[2]} slices")
+    total_voxels = img3d.shape[0] * img3d.shape[1] * img3d.shape[2]
+    dxyz_source = "auto" if args.dxyz is None else "override"
+    print(f"Voxelized shape: {img3d.shape} | dxyz: {params['dxyz']:.4f} µm ({dxyz_source}) | Total voxels: {total_voxels:,}")
 
-    # Output options
+    # Output options — Docker produces JSON only by default
     output_options = {
-        "does_plot": not args.no_plot,
+        "does_plot": False,
         "further_smooth": not args.no_smooth,
-        "save_png": not args.no_png,
-        "save_mat": not args.no_mat,
-        "save_json": not args.no_json,
+        "save_png": False,
+        "save_mat": False,
+        "save_json": True,
     }
 
     # Run pipeline

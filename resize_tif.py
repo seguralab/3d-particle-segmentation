@@ -40,6 +40,12 @@ def convert_tif(filename, dx, dy, dz, dxyz, fluorescent_label, crop_bool):
     # Read the TIFF file; it's assumed to contain multiple images in a Z-stack
     img_stack = tifffile.imread(filename)
 
+    if img_stack.ndim != 3:
+        raise ValueError(
+            f"TIF file has {img_stack.ndim}D data (shape={img_stack.shape}), "
+            "expected 3D single-channel. Multi-channel TIF files are not supported."
+        )
+
     # Shape of the image stack
     Lz, Lx, Ly = img_stack.shape
 

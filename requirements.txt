@@ -1,7 +1,7 @@
 numpy
 scipy
 matplotlib
-scikit-image
+scikit-image >= 0.19.3
 tqdm
 pillow
-tifffile
+tifffile >= 2024.2.12

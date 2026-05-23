@@ -44,24 +44,24 @@ def parse_args():
     parser.add_argument("--dxyz", type=float, help="Resized voxel size (micrometers)")
     parser.add_argument("--th", type=int, help="Intensity threshold")
     parser.add_argument(
-        "--radius-um", type=float, help="Expected bead radius (micrometers)"
+        "--radius-um", "--radius_um", type=float, help="Expected bead radius (micrometers)"
     )
-    parser.add_argument("--s2v-max", type=float, help="Max surface-to-volume ratio")
+    parser.add_argument("--s2v-max", "--s2v_max", type=float, help="Max surface-to-volume ratio")
     parser.add_argument(
-        "--fluorescent-label",
+        "--fluorescent-label", "--fluorescent_label",
         type=int,
         choices=[0, 1],
         help="1=beads labeled, 0=void labeled",
     )
     parser.add_argument(
-        "--crop-bool", type=int, choices=[0, 1], help="1=crop, 0=full image"
+        "--crop-bool", "--crop_bool", type=int, choices=[0, 1], help="1=crop, 0=full image"
     )
-    parser.add_argument("--channel-num", type=int, help="Channel number (LIF files)")
-    parser.add_argument("--example-frame", type=int, help="Z-slice for visualization")
-    parser.add_argument("--peak-prom", type=float, help="Peak prominence for seed detection (auto: radius/5)")
-    parser.add_argument("--d-peak", type=float, help="Min distance between peaks in voxels (auto: radius)")
-    parser.add_argument("--inten-max", type=float, help="Max intensity always foreground (auto: th*3.33)")
-    parser.add_argument("--th-relative", type=float, help="Relative brightness threshold (auto: th/3)")
+    parser.add_argument("--channel-num", "--channel_num", type=int, help="Channel number (LIF files)")
+    parser.add_argument("--example-frame", "--example_frame", type=int, help="Z-slice for visualization")
+    parser.add_argument("--peak-prom", "--peak_prom", type=float, help="Peak prominence for seed detection (auto: radius/5)")
+    parser.add_argument("--d-peak", "--d_peak", type=float, help="Min distance between peaks in voxels (auto: radius)")
+    parser.add_argument("--inten-max", "--inten_max", type=float, help="Max intensity always foreground (auto: th*3.33)")
+    parser.add_argument("--th-relative", "--th_relative", type=float, help="Relative brightness threshold (auto: th/3)")
 
     # Output options
     parser.add_argument(

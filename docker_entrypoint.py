@@ -135,8 +135,8 @@ def main():
                 detected_meta['dy'] = meta_dy
             if meta_dz is not None:
                 detected_meta['dz'] = meta_dz
-        except Exception:
-            pass
+        except Exception as meta_err:
+            print(f"Metadata detection failed for {filepath}: {meta_err}", file=sys.stderr)
 
     # Validate required parameters
     try:

@@ -123,35 +123,34 @@ def main():
         params.update(overrides)
         print(f"Applied overrides: {list(overrides.keys())}")
 
-    # Validate required parameters.
-    # For TIF files, attempt to read dx/dy/dz from metadata and include
-    # detected values in the error message so the calling API/frontend can
-    # present them for user confirmation.
+    # For TIF files, attempt to read dx/dy/dz from file metadata before
+    # validation so we can include detected values in any error message.
+    detected_meta = {}
+    if input_type == 'tif':
+        try:
+            meta_dx, meta_dy, meta_dz = get_pixel_and_z_dimensions(filepath)
+            if meta_dx is not None:
+                detected_meta['dx'] = meta_dx
+            if meta_dy is not None:
+                detected_meta['dy'] = meta_dy
+            if meta_dz is not None:
+                detected_meta['dz'] = meta_dz
+        except Exception:
+            pass
+
+    # Validate required parameters
     try:
         validate_required_params(params, input_type)
     except ValueError as e:
-        detected = {}
-        if input_type == 'tif' and os.path.exists(filepath):
-            try:
-                meta_dx, meta_dy, meta_dz = get_pixel_and_z_dimensions(filepath)
-                if meta_dx is not None:
-                    detected['dx'] = meta_dx
-                if meta_dy is not None:
-                    detected['dy'] = meta_dy
-                if meta_dz is not None:
-                    detected['dz'] = meta_dz
-            except Exception:
-                pass  # metadata extraction failed, just show the error
-
         print(f"Error: {e}", file=sys.stderr)
-        if detected:
-            print(f"\nDetected from TIF metadata: {detected}", file=sys.stderr)
+        if detected_meta:
+            print(f"\nDetected from TIF metadata: {detected_meta}", file=sys.stderr)
             print(
                 "Please confirm these values by passing them explicitly "
                 "(e.g. --dx {dx} --dy {dy} --dz {dz}).".format(
-                    dx=detected.get('dx', '?'),
-                    dy=detected.get('dy', '?'),
-                    dz=detected.get('dz', '?'),
+                    dx=detected_meta.get('dx', '?'),
+                    dy=detected_meta.get('dy', '?'),
+                    dz=detected_meta.get('dz', '?'),
                 ),
                 file=sys.stderr,
             )

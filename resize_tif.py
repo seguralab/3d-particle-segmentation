@@ -20,19 +20,15 @@ def get_pixel_and_z_dimensions(filename):
         dx = 1 / (xres[0] / xres[1]) if isinstance(xres, tuple) else 1 / xres if xres else None
         dy = 1 / (yres[0] / yres[1]) if isinstance(yres, tuple) else 1 / yres if yres else None
 
-        # Attempt to find Z step size, might be in a custom tag or description
+        # Attempt to find Z step size from ImageDescription metadata
         for page in tif.pages:
             if 'ImageDescription' in page.tags:
                 description = page.tags['ImageDescription'].value
-                # You might need to adjust this part to match the specific format in your files
                 if "spacing=" in description:
                     start_index = description.index("spacing=") + len("spacing=")
                     end_index = description.index("\n", start_index)
                     zstep = float(description[start_index:end_index])
-                else:
-                    zstep = dx
-            else:
-                zstep = dx
+                    break
 
         return dx, dy, zstep
 

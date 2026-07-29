@@ -237,6 +237,7 @@ def run_segmentation(img3d, filename, params, output_options):
     None
         Saves outputs to output/{filename}/ directory
     """
+    pipeline_start = time.perf_counter()
     
     # Extract parameters
     dxyz = params.get('dxyz', 1.0)
@@ -451,3 +452,4 @@ def run_segmentation(img3d, filename, params, output_options):
     print(f"\nSegmentation complete!")
     print(f"Output directory: {output_dir}")
     print(f"Total beads detected: {bead_count}")
+    print(f"Segmentation runtime: {time.perf_counter() - pipeline_start:.2f} s")

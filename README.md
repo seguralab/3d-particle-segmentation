@@ -111,25 +111,27 @@ docker run \
 
 **Available CLI flags:**
 
-| Flag | Type | Description |
-|------|------|-------------|
-| `--filename` | string | **(Required)** Input filename |
-| `--input-dir` | string | Input directory (default: `./input`) |
-| `--output-dir` | string | Output directory (default: `./output`) |
-| `--th` | int | Intensity threshold |
-| `--radius-um` | float | Expected bead radius (µm) |
-| `--dxyz` | float | Resized voxel size (µm) |
-| `--dx`, `--dy`, `--dz` | float | Original voxel dimensions (µm) |
-| `--s2v-max` | float | Max surface-to-volume ratio |
-| `--fluorescent-label` | 0 or 1 | 1 = beads labeled, 0 = void labeled |
-| `--crop-bool` | 0 or 1 | Crop image toggle |
-| `--channel-num` | int | Channel number (LIF files) |
-| `--example-frame` | int | Z-slice index for visualization |
-| `--no-plot` | flag | Disable visualization plots |
-| `--no-smooth` | flag | Disable morphological smoothing |
-| `--no-png` | flag | Disable PNG output |
-| `--no-mat` | flag | Disable MAT output |
-| `--no-json` | flag | Disable JSON output |
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--filename` | string | **Yes** | Input filename |
+| `--fluorescent-label` | 0 or 1 | **Yes** (TIF/LIF) | 1 = beads labeled, 0 = void labeled. Never auto-detected. |
+| `--radius-um` | float | **Yes** (TIF/LIF) | Expected bead radius (µm). Never auto-detected. |
+| `--dx` | float | Auto-detected | Pixel width (µm). Auto-detected from TIF `XResolution` tag if not provided. |
+| `--dy` | float | Auto-detected | Pixel height (µm). Auto-detected from TIF `YResolution` tag if not provided. |
+| `--dz` | float | Auto-detected | Z-spacing (µm). Auto-detected from TIF `spacing=` metadata if available. Often missing — provide explicitly when possible. |
+| `--input-dir` | string | No | Input directory (default: `./input`) |
+| `--output-dir` | string | No | Output directory (default: `./output`) |
+| `--th` | int | No | Intensity threshold |
+| `--dxyz` | float | No | Resized voxel size (µm) |
+| `--s2v-max` | float | No | Max surface-to-volume ratio |
+| `--crop-bool` | 0 or 1 | No | Crop image toggle |
+| `--channel-num` | int | No | Channel number (LIF files) |
+| `--example-frame` | int | No | Z-slice index for visualization |
+| `--no-plot` | flag | No | Disable visualization plots |
+| `--no-smooth` | flag | No | Disable morphological smoothing |
+| `--no-png` | flag | No | Disable PNG output |
+| `--no-mat` | flag | No | Disable MAT output |
+| `--no-json` | flag | No | Disable JSON output |
 
 Any parameter you don't specify uses the default for the detected file type (see [Main Parameters](#main-parameters) below).
 
@@ -138,6 +140,44 @@ Any parameter you don't specify uses the default for the detected file type (see
 ```bash
 python docker_entrypoint.py --filename my_sample.tif --th 120
 ```
+
+## Parameter Resolution (TIF files)
+
+For TIF files, voxel dimensions (`dx`, `dy`, `dz`) are resolved in this order:
+
+1. **CLI arguments** (highest priority) — values passed via `--dx`, `--dy`, `--dz`
+2. **TIF metadata auto-detection** — extracted from the file's TIFF tags and ImageDescription
+3. **Built-in defaults** — hardcoded fallback values
+
+Auto-detection reads:
+- **dx, dy**: From standard TIFF `XResolution` / `YResolution` tags (pixels per unit). Most TIF files include these.
+- **dz**: From the `spacing=` field in the ImageJ-format `ImageDescription` tag, or from `PhysicalSizeZ` in OME-XML metadata. Many TIF files do **not** include z-spacing — if absent, `dz` will not be auto-detected and must be provided via CLI.
+
+When auto-detection fills in missing values, it logs:
+```
+Auto-detected from TIF metadata: {'dx': 0.1554, 'dy': 0.1554}
+```
+
+If required parameters are still missing after auto-detection, the process exits with an error (see [Exit Codes](#exit-codes)).
+
+### Caller Recommendations (lovamap-core / lovamap-gw)
+
+- Always pass `--fluorescent-label` and `--radius-um` — these are never auto-detected.
+- Pass `--dx`, `--dy`, `--dz` when the user provides them. If omitted, auto-detection will attempt to fill them in.
+- If a job fails with exit code 1, check stderr for the specific missing parameters (e.g., `Missing required parameters: dz`). Surface this to the user so they can provide the missing values and resubmit.
+
+## Exit Codes
+
+| Code | Meaning | Stderr Output |
+|------|---------|---------------|
+| `0` | Success | — |
+| `1` | Missing required parameters | `Error: Missing required parameters: <list>` followed by `For TIF/LIF files, you must provide: --dx, --dy, --dz, --fluorescent-label, --radius-um` |
+| `1` | Invalid input file type | `Error: Unsupported file type: <ext>` |
+| `1` | Image loading failure (e.g., corrupt file, wrong dimensions) | `ValueError` or `TypeError` message on stderr |
+| `2` | CLI argument parsing error (argparse) | argparse usage message on stderr |
+| non-zero | Unexpected runtime error (OOM, etc.) | Python traceback on stderr |
+
+All diagnostic/progress messages go to **stdout**. All errors go to **stderr**.
 
 ## Processing Pipeline
 

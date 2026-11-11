@@ -20,7 +20,8 @@ def get_pixel_and_z_dimensions(filename):
         dx = 1 / (xres[0] / xres[1]) if isinstance(xres, tuple) else 1 / xres if xres else None
         dy = 1 / (yres[0] / yres[1]) if isinstance(yres, tuple) else 1 / yres if yres else None
 
-        # Attempt to find Z step size from ImageDescription metadata
+        # Attempt to find Z step size from ImageDescription metadata.
+        # Try ImageJ "spacing=" first, then OME-XML "PhysicalSizeZ".
         for page in tif.pages:
             if 'ImageDescription' in page.tags:
                 description = page.tags['ImageDescription'].value
@@ -29,6 +30,17 @@ def get_pixel_and_z_dimensions(filename):
                     end_index = description.index("\n", start_index)
                     zstep = float(description[start_index:end_index])
                     break
+
+        if zstep is None and tif.ome_metadata:
+            try:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(tif.ome_metadata)
+                ns = root.tag.split('}')[0] + '}' if '}' in root.tag else ''
+                pixels = root.find(f'.//{ns}Pixels')
+                if pixels is not None and 'PhysicalSizeZ' in pixels.attrib:
+                    zstep = float(pixels.attrib['PhysicalSizeZ'])
+            except Exception:
+                pass
 
         return dx, dy, zstep
 

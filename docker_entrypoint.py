@@ -155,19 +155,9 @@ def main():
             except Exception as meta_err:
                 print(f"Metadata detection failed for {filepath}: {meta_err}", file=sys.stderr)
 
-        # Validate required parameters
-        try:
-            validate_required_params(params, input_type)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            print(
-                "\nFor TIF/LIF files, you must provide: "
-                "--dx, --dy, --dz, --fluorescent-label, --radius-um",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        # Preview-only mode: read raw slices directly (no resize) and exit
+        # Preview-only mode: read raw slices directly (no resize) and exit.
+        # Only needs dx/dy/dz for the metadata JSON — skip full validation
+        # (fluorescent_label, radius_um are segmentation params, not needed here).
         if args.preview_only:
             name = Path(args.filename).stem
             preview_dir = os.path.join('output', name, 'previews')
@@ -243,6 +233,18 @@ def main():
 
             print(f"Preview saved to {preview_dir}")
             sys.exit(0)
+
+        # Validate required parameters (full segmentation needs all of them)
+        try:
+            validate_required_params(params, input_type)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            print(
+                "\nFor TIF/LIF files, you must provide: "
+                "--dx, --dy, --dz, --fluorescent-label, --radius-um",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         # Load image
         print(f"Loading: {filepath}")

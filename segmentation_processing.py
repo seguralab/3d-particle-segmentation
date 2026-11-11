@@ -421,6 +421,43 @@ def run_segmentation(img3d, filename, params, output_options):
         if save_mat:
             savemat(file_output_smooth, {'labels': labels}, do_compression=True)
     
+    # %% Generate segmented cross-section previews
+    # These run regardless of does_plot/save_png — they're for the validation UI
+    preview_dir = os.path.join(output_dir, 'previews')
+    os.makedirs(preview_dir, exist_ok=True)
+
+    num_labels = int(labels.max())
+    # Deterministic random colors: background=black, each label gets a distinct color
+    rng = np.random.RandomState(42)
+    color_lut = np.zeros((num_labels + 1, 3), dtype=np.uint8)
+    color_lut[1:] = rng.randint(50, 256, size=(num_labels, 3))
+
+    seg_slice_specs = [
+        ("segmented_slice_25.png", Lz // 4),
+        ("segmented_slice_50.png", Lz // 2),
+        ("segmented_slice_75.png", 3 * Lz // 4),
+    ]
+    for slice_name, z_idx in seg_slice_specs:
+        label_slice = labels[:, :, z_idx]
+        rgb = color_lut[label_slice]
+        plt.imsave(os.path.join(preview_dir, slice_name), rgb)
+
+    # Update preview_info.json with segmented_slices
+    preview_info_path = os.path.join(preview_dir, 'preview_info.json')
+    if os.path.exists(preview_info_path):
+        with open(preview_info_path, 'r') as f:
+            preview_info = json.load(f)
+    else:
+        preview_info = {}
+    preview_info["segmented_slices"] = [
+        {"name": sname, "z_index": int(z_idx)}
+        for sname, z_idx in seg_slice_specs
+    ]
+    preview_info["segmented_dimensions"] = {"x": int(Lx), "y": int(Ly), "z": int(Lz)}
+    with open(preview_info_path, 'w') as f:
+        json.dump(preview_info, f, indent=2)
+    print(f"Segmented previews saved to {preview_dir}")
+
     # %% Final: Convert to JSON format
     (list_bead_voxel_count, list_bead_data) = list_sparse(list_labels_2, (Lx, Ly, Lz))
     bead_count = len(list_bead_voxel_count)

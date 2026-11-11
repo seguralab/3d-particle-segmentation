@@ -232,6 +232,51 @@ output/{stem}/previews/
 
 **Non-TIF files:** LIF and MAT inputs fall back to a full load via `load_and_process_input()` for slice extraction since there is no equivalent raw page read for those formats.
 
+### Segmented Preview Slices
+
+When the full segmentation pipeline runs (i.e., **not** `--preview-only`), 3 additional cross-section PNGs are generated from the final labeled volume at the same 25%, 50%, 75% Z-depths:
+
+```
+output/{stem}/previews/
+├── input_slice_25.png         # Raw input (from --preview-only)
+├── input_slice_50.png
+├── input_slice_75.png
+├── segmented_slice_25.png     # Labeled volume cross-section
+├── segmented_slice_50.png
+├── segmented_slice_75.png
+└── preview_info.json          # Updated with segmented_slices
+```
+
+Each segmented slice is a flat 2D color-mapped image where background (label 0) is black and each particle ID gets a distinct, deterministic color. These are generated **regardless** of `--no-plot` / `--no-png` flags (those control intermediate pipeline visualizations, not validation previews).
+
+The existing `preview_info.json` is updated with two new fields:
+
+```json
+{
+  "filename": "sample.tif",
+  "dimensions": {"x": 512, "y": 512, "z": 200},
+  "voxel_size": {"dx": 0.155, "dy": 0.155, "dz": 1.0},
+  "slices": [
+    {"name": "input_slice_25.png", "z_index": 50},
+    {"name": "input_slice_50.png", "z_index": 100},
+    {"name": "input_slice_75.png", "z_index": 150}
+  ],
+  "segmented_slices": [
+    {"name": "segmented_slice_25.png", "z_index": 37},
+    {"name": "segmented_slice_50.png", "z_index": 75},
+    {"name": "segmented_slice_75.png", "z_index": 112}
+  ],
+  "segmented_dimensions": {"x": 384, "y": 384, "z": 150}
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `segmented_slices` | List of segmented cross-section PNGs with their Z-index into the **resized** volume |
+| `segmented_dimensions` | Dimensions of the resized/segmented volume (may differ from raw `dimensions`) |
+
+**Note:** The `slices` Z-indices reference the raw input dimensions, while `segmented_slices` Z-indices reference the resized volume dimensions. Both use 25/50/75% of their respective Z-depth, so they represent the same anatomical depth despite different absolute indices.
+
 ## Exit Codes
 
 | Code | Meaning | Stderr Output |
@@ -290,7 +335,12 @@ The segmentation workflow follows these steps:
    - Removes sharp protruding voxels from bead surfaces
    - Improves morphological quality if `further_smooth = True`
 
-### 10. **Output Generation**
+### 10. **Segmented Preview Generation**
+   - Saves 3 color-mapped cross-sections of the labeled volume (25%, 50%, 75% Z-depth)
+   - Updates `preview_info.json` with `segmented_slices` and `segmented_dimensions`
+   - Runs unconditionally (not affected by `--no-plot` / `--no-png`)
+
+### 11. **Output Generation**
    - **JSON**: Bead count, coordinates, and metadata
    - **MAT files**: Labeled volume before/after smoothing
    - **PNG plots**: Intermediate visualization at each stage
@@ -362,7 +412,7 @@ For each input file, the script creates a folder `output/{filename}/` containing
 - `Smoothed_{filename}_segment_{th}.mat` - Labeled volume (after smoothing)
 - `{filename}_segment_{th}.json` - Segmentation metadata and bead data
 - Various `*_frame_*.png` files - Visualization plots at different processing stages
-- `previews/` - Preview slices and metadata (only created by `--preview-only`, see [Preview Mode](#preview-mode))
+- `previews/` - Input preview slices (from `--preview-only`) and segmented cross-sections (from full runs). See [Preview Mode](#preview-mode) and [Segmented Preview Slices](#segmented-preview-slices).
 
 ## Function Reference
 

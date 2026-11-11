@@ -132,6 +132,7 @@ docker run \
 | `--no-png` | flag | No | Disable PNG output |
 | `--no-mat` | flag | No | Disable MAT output |
 | `--no-json` | flag | No | Disable JSON output |
+| `--preview-only` | flag | No | Validate input and save preview slices without running segmentation (see [Preview Mode](#preview-mode)) |
 
 Any parameter you don't specify uses the default for the detected file type (see [Main Parameters](#main-parameters) below).
 
@@ -165,6 +166,71 @@ If required parameters are still missing after auto-detection, the process exits
 - Always pass `--fluorescent-label` and `--radius-um` — these are never auto-detected.
 - Pass `--dx`, `--dy`, `--dz` when the user provides them. If omitted, auto-detection will attempt to fill them in.
 - If a job fails with exit code 1, check stderr for the specific missing parameters (e.g., `Missing required parameters: dz`). Surface this to the user so they can provide the missing values and resubmit.
+
+## Preview Mode
+
+The `--preview-only` flag runs a fast validation and preview step without executing the segmentation pipeline. It parses parameters, auto-detects TIF metadata, validates required params, then extracts 3 representative Z-slices directly from the raw file and exits.
+
+**Example invocation:**
+
+```bash
+docker run \
+  -v /data/input:/app/input \
+  -v /data/output:/app/output \
+  ghcr.io/seguralab/3d-particle-segmentation:latest \
+  --filename sample.tif \
+  --fluorescent-label 1 \
+  --radius-um 45 \
+  --preview-only
+```
+
+**What it does:**
+
+1. Parses all CLI args and applies overrides (same as a normal run)
+2. Auto-detects dx/dy/dz from TIF metadata (same as a normal run)
+3. Validates required parameters — exits with code 1 if any are missing
+4. For TIF files: reads 3 raw pages directly at 25%, 50%, 75% Z-depth (no resize, no full-stack load)
+5. Saves preview PNGs and a metadata JSON, then exits with code 0
+
+**Why it's fast:** For TIF files, it reads only 3 individual 2D pages from the file using `tifffile` — it never loads the full 3D stack or runs scipy zoom. A 500MB TIF preview completes in seconds.
+
+**Output structure:**
+
+```
+output/{stem}/previews/
+├── input_slice_25.png      # Z-slice at 25% depth (raw, unresized)
+├── input_slice_50.png      # Z-slice at 50% depth
+├── input_slice_75.png      # Z-slice at 75% depth
+└── preview_info.json       # Metadata summary
+```
+
+**preview_info.json schema:**
+
+```json
+{
+  "filename": "sample.tif",
+  "dimensions": {"x": 512, "y": 512, "z": 200},
+  "voxel_size": {"dx": 0.155, "dy": 0.155, "dz": 1.0},
+  "voxel_size_sources": {"dx": "tif_metadata", "dy": "tif_metadata", "dz": "cli"},
+  "slices": [
+    {"name": "input_slice_25.png", "z_index": 50},
+    {"name": "input_slice_50.png", "z_index": 100},
+    {"name": "input_slice_75.png", "z_index": 150}
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `filename` | Original input filename as passed via `--filename` |
+| `dimensions` | Raw input dimensions in pixels/slices (x, y, z). These are the original file dimensions, not resized. |
+| `voxel_size` | Resolved voxel sizes in µm. Values may be `null` if not available (e.g., MAT files). |
+| `voxel_size_sources` | Where each voxel size came from: `"cli"` (passed via flag), `"tif_metadata"` (auto-detected from TIFF tags), or `"default"` (built-in fallback) |
+| `slices` | List of saved preview slices with their Z-index into the raw stack |
+
+**Exit codes in preview mode:** Same as normal runs — code 1 for missing required params, code 2 for CLI parse errors, code 0 on success.
+
+**Non-TIF files:** LIF and MAT inputs fall back to a full load via `load_and_process_input()` for slice extraction since there is no equivalent raw page read for those formats.
 
 ## Exit Codes
 
@@ -296,6 +362,7 @@ For each input file, the script creates a folder `output/{filename}/` containing
 - `Smoothed_{filename}_segment_{th}.mat` - Labeled volume (after smoothing)
 - `{filename}_segment_{th}.json` - Segmentation metadata and bead data
 - Various `*_frame_*.png` files - Visualization plots at different processing stages
+- `previews/` - Preview slices and metadata (only created by `--preview-only`, see [Preview Mode](#preview-mode))
 
 ## Function Reference
 
@@ -335,4 +402,5 @@ Lower-level segmentation utilities are in utils.py
 ├── input/                      # Place your input images here
 └── output/                     # Segmentation results saved here
     └── {filename}/            # Results organized by input file name
+        └── previews/          # Preview slices from --preview-only
 ```

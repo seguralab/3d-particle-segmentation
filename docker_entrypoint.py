@@ -7,9 +7,17 @@ arguments, then delegates to the segmentation pipeline.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
+from pathlib import Path
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import tifffile
+
 from segmentation_processing import (
     detect_input_type,
     load_and_process_input,
@@ -75,6 +83,12 @@ def parse_args():
     parser.add_argument("--no-mat", action="store_true", help="Disable MAT output")
     parser.add_argument("--no-json", action="store_true", help="Disable JSON output")
 
+    # Preview mode
+    parser.add_argument(
+        "--preview-only", action="store_true",
+        help="Load, validate, and save preview slices without running segmentation",
+    )
+
     return parser.parse_args()
 
 
@@ -128,16 +142,16 @@ def main():
 
         # For TIF files, auto-detect dx/dy/dz from metadata as fallback
         # for any values not explicitly provided via CLI.
+        metadata_detected = {}
         if input_type == 'tif':
             try:
                 meta_dx, meta_dy, meta_dz = get_pixel_and_z_dimensions(filepath)
-                detected = {}
                 for key, val in [('dx', meta_dx), ('dy', meta_dy), ('dz', meta_dz)]:
                     if val is not None and key not in overrides:
                         params[key] = val
-                        detected[key] = val
-                if detected:
-                    print(f"Auto-detected from TIF metadata: {detected}")
+                        metadata_detected[key] = val
+                if metadata_detected:
+                    print(f"Auto-detected from TIF metadata: {metadata_detected}")
             except Exception as meta_err:
                 print(f"Metadata detection failed for {filepath}: {meta_err}", file=sys.stderr)
 
@@ -152,6 +166,83 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        # Preview-only mode: read raw slices directly (no resize) and exit
+        if args.preview_only:
+            name = Path(args.filename).stem
+            preview_dir = os.path.join('output', name, 'previews')
+            os.makedirs(preview_dir, exist_ok=True)
+
+            if input_type == 'tif':
+                with tifffile.TiffFile(filepath) as tif:
+                    Lz = len(tif.pages)
+                    page_shape = tif.pages[0].shape
+                    if len(page_shape) != 2:
+                        print(
+                            f"Error: TIF has {len(page_shape)+1}D pages (shape={page_shape}). "
+                            "Multi-channel TIF files are not supported.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+                    Lx, Ly = page_shape
+
+                    slice_specs = [
+                        ("input_slice_25.png", Lz // 4),
+                        ("input_slice_50.png", Lz // 2),
+                        ("input_slice_75.png", 3 * Lz // 4),
+                    ]
+                    for slice_name, z_idx in slice_specs:
+                        page_data = tif.pages[z_idx].asarray()
+                        plt.imsave(
+                            os.path.join(preview_dir, slice_name),
+                            page_data,
+                            cmap='gray',
+                        )
+            else:
+                # Non-TIF: fall back to full load for slice extraction
+                img3d = load_and_process_input(filepath, input_type, params)
+                Lx, Ly, Lz = img3d.shape
+                slice_specs = [
+                    ("input_slice_25.png", Lz // 4),
+                    ("input_slice_50.png", Lz // 2),
+                    ("input_slice_75.png", 3 * Lz // 4),
+                ]
+                for slice_name, z_idx in slice_specs:
+                    plt.imsave(
+                        os.path.join(preview_dir, slice_name),
+                        img3d[:, :, z_idx],
+                        cmap='gray',
+                    )
+
+            voxel_size_sources = {}
+            for key in ('dx', 'dy', 'dz'):
+                if key in overrides:
+                    voxel_size_sources[key] = "cli"
+                elif key in metadata_detected:
+                    voxel_size_sources[key] = "tif_metadata"
+                elif key in params:
+                    voxel_size_sources[key] = "default"
+
+            preview_info = {
+                "filename": args.filename,
+                "dimensions": {"x": int(Lx), "y": int(Ly), "z": int(Lz)},
+                "voxel_size": {
+                    "dx": params.get('dx'),
+                    "dy": params.get('dy'),
+                    "dz": params.get('dz'),
+                },
+                "voxel_size_sources": voxel_size_sources,
+                "slices": [
+                    {"name": sname, "z_index": z_idx}
+                    for sname, z_idx in slice_specs
+                ],
+            }
+
+            with open(os.path.join(preview_dir, 'preview_info.json'), 'w') as f:
+                json.dump(preview_info, f, indent=2)
+
+            print(f"Preview saved to {preview_dir}")
+            sys.exit(0)
 
         # Load image
         print(f"Loading: {filepath}")

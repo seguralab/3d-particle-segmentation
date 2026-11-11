@@ -19,7 +19,7 @@ from segmentation_processing import detect_input_type, load_and_process_input, g
 
 # Input file configuration
 INPUT_DIR = './input/'
-FILENAME = 'MASK_10p30x30_P12_S2_10xZoom_0.5AD_1ss_93sl-1.tif'
+FILENAME = 'Cody_temp.tif'
 # FILENAME = 'EK081920_FLIP_488void_647gel_20X.tif'
 
 # ============================================================================

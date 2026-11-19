@@ -464,6 +464,8 @@ def run_segmentation(img3d, filename, params, output_options):
         for sname, z_idx in seg_slice_specs
     ]
     preview_info["segmented_dimensions"] = {"x": int(Lx), "y": int(Ly), "z": int(Lz)}
+    preview_info["resized_voxel_size"] = float(voxel_size)
+    preview_info["domain_voxel_count"] = int(Lx * Ly * Lz)
     with open(preview_info_path, 'w') as f:
         json.dump(preview_info, f, indent=2)
     print(f"Segmented previews saved to {preview_dir}")

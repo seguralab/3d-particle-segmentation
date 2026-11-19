@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import tifffile
 
 from segmentation_processing import (
+    compute_auto_dxyz,
     detect_input_type,
     load_and_process_input,
     get_default_params,
@@ -220,15 +221,36 @@ def main():
                 elif key in params:
                     voxel_size_sources[key] = "default"
 
+            dx_val = params.get('dx')
+            dy_val = params.get('dy')
+            dz_val = params.get('dz')
+            if args.dxyz is not None:
+                preview_dxyz = args.dxyz
+            elif dx_val and dy_val and dz_val:
+                target_voxels = RESOLUTION_PRESETS[args.resolution]
+                preview_dxyz = compute_auto_dxyz(Lx, Ly, Lz, dx_val, dy_val, dz_val, target_voxels)
+            else:
+                preview_dxyz = None
+
+            if preview_dxyz and dx_val and dy_val and dz_val:
+                est_Lx = round(Lx * dx_val / preview_dxyz)
+                est_Ly = round(Ly * dy_val / preview_dxyz)
+                est_Lz = round(Lz * dz_val / preview_dxyz)
+                est_domain_voxels = est_Lx * est_Ly * est_Lz
+            else:
+                est_domain_voxels = None
+
             preview_info = {
                 "filename": args.filename,
                 "dimensions": {"x": int(Lx), "y": int(Ly), "z": int(Lz)},
                 "voxel_size": {
-                    "dx": params.get('dx'),
-                    "dy": params.get('dy'),
-                    "dz": params.get('dz'),
+                    "dx": dx_val,
+                    "dy": dy_val,
+                    "dz": dz_val,
                 },
                 "voxel_size_sources": voxel_size_sources,
+                "resized_voxel_size": preview_dxyz,
+                "estimated_domain_voxels": est_domain_voxels,
                 "slices": [
                     {"name": sname, "z_index": z_idx}
                     for sname, z_idx in slice_specs

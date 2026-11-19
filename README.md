@@ -238,6 +238,8 @@ output/{stem}/previews/
   "dimensions": {"x": 512, "y": 512, "z": 200},
   "voxel_size": {"dx": 0.155, "dy": 0.155, "dz": 1.0},
   "voxel_size_sources": {"dx": "tif_metadata", "dy": "tif_metadata", "dz": "cli"},
+  "resized_voxel_size": 0.3,
+  "estimated_domain_voxels": 48620250,
   "slices": [
     {"name": "input_slice_25.png", "z_index": 50},
     {"name": "input_slice_50.png", "z_index": 100},
@@ -252,6 +254,8 @@ output/{stem}/previews/
 | `dimensions` | Raw input dimensions in pixels/slices (x, y, z). These are the original file dimensions, not resized. |
 | `voxel_size` | Resolved voxel sizes in µm. Values may be `null` if not available (e.g., MAT files). |
 | `voxel_size_sources` | Where each voxel size came from: `"cli"` (passed via flag), `"tif_metadata"` (auto-detected from TIFF tags), or `"default"` (built-in fallback) |
+| `resized_voxel_size` | Computed cubic voxel size in µm (from `--dxyz` or auto-calculated from resolution preset). `null` if voxel dims unknown. |
+| `estimated_domain_voxels` | Estimated total voxel count of the resized volume. `null` if voxel dims unknown. |
 | `slices` | List of saved preview slices with their Z-index into the raw stack |
 
 **Exit codes in preview mode:** Same as normal runs — code 1 for missing required params, code 2 for CLI parse errors, code 0 on success.
@@ -282,6 +286,8 @@ The existing `preview_info.json` is updated with two new fields:
   "filename": "sample.tif",
   "dimensions": {"x": 512, "y": 512, "z": 200},
   "voxel_size": {"dx": 0.155, "dy": 0.155, "dz": 1.0},
+  "resized_voxel_size": 0.3,
+  "estimated_domain_voxels": 48620250,
   "slices": [
     {"name": "input_slice_25.png", "z_index": 50},
     {"name": "input_slice_50.png", "z_index": 100},
@@ -292,7 +298,8 @@ The existing `preview_info.json` is updated with two new fields:
     {"name": "segmented_slice_50.png", "z_index": 75},
     {"name": "segmented_slice_75.png", "z_index": 112}
   ],
-  "segmented_dimensions": {"x": 384, "y": 384, "z": 150}
+  "segmented_dimensions": {"x": 384, "y": 384, "z": 150},
+  "domain_voxel_count": 21657600
 }
 ```
 
@@ -300,6 +307,8 @@ The existing `preview_info.json` is updated with two new fields:
 |-------|-------------|
 | `segmented_slices` | List of segmented cross-section PNGs with their Z-index into the **resized** volume |
 | `segmented_dimensions` | Dimensions of the resized/segmented volume (may differ from raw `dimensions`) |
+| `resized_voxel_size` | Actual cubic voxel size in µm used for the resized volume |
+| `domain_voxel_count` | Actual total voxel count of the resized volume |
 
 **Note:** The `slices` Z-indices reference the raw input dimensions, while `segmented_slices` Z-indices reference the resized volume dimensions. Both use 25/50/75% of their respective Z-depth, so they represent the same anatomical depth despite different absolute indices.
 

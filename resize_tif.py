@@ -20,6 +20,22 @@ def get_pixel_and_z_dimensions(filename):
         dx = 1 / (xres[0] / xres[1]) if isinstance(xres, tuple) else 1 / xres if xres else None
         dy = 1 / (yres[0] / yres[1]) if isinstance(yres, tuple) else 1 / yres if yres else None
 
+        # Convert to microns based on ResolutionUnit.
+        # TIFF spec: 1=No unit, 2=Inch, 3=Centimeter.
+        # tifffile may return int or enum; coerce to int for comparison.
+        res_unit_tag = tif.pages[0].tags.get('ResolutionUnit')
+        res_unit = int(res_unit_tag.value) if res_unit_tag else 1
+        if res_unit == 2:  # inch → µm
+            if dx is not None:
+                dx *= 25400
+            if dy is not None:
+                dy *= 25400
+        elif res_unit == 3:  # centimeter → µm
+            if dx is not None:
+                dx *= 10000
+            if dy is not None:
+                dy *= 10000
+
         # Attempt to find Z step size from ImageDescription metadata.
         # Try ImageJ "spacing=" first, then OME-XML "PhysicalSizeZ".
         for page in tif.pages:

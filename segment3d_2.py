@@ -9,7 +9,7 @@ import os
 import time
 from pathlib import Path
 from tqdm import tqdm
-from segmentation_processing import detect_input_type, load_and_process_input, get_default_params, validate_required_params, run_segmentation
+from segmentation_processing import detect_input_type, load_and_process_input, get_default_params, validate_required_params, run_segmentation, RESOLUTION_PRESETS
 
 
 # ============================================================================
@@ -49,7 +49,8 @@ PARAMS_REQUIRED = {
 # ============================================================================
 
 PARAMS_OPTIONAL = {
-    # --- Input/Loading Parameters ---
+    # --- Resolution / Voxel Size ---
+    # 'resolution': 'normal',    # 'normal' (~70M voxels) or 'high' (~700M voxels)
     # 'dxyz': 1.5,               # Resized voxel size (µm, uniform) — auto-calculated if not set
     # 'crop_bool': 0,            # 1 = crop image, 0 = keep full image
     # 'channel_num': 1,          # Channel number (1-4, for LIF files only)
@@ -105,6 +106,11 @@ def main():
         params.update(PARAMS_OPTIONAL)
         applied = list(PARAMS_REQUIRED.keys()) + list(PARAMS_OPTIONAL.keys())
         tqdm.write(f"✓ Applied parameter overrides: {applied}")
+
+        # Apply resolution preset (only matters when dxyz is auto-calculated)
+        resolution = params.get('resolution', 'normal')
+        params['target_voxels'] = RESOLUTION_PRESETS[resolution]
+        tqdm.write(f"✓ Resolution: {resolution} (~{params['target_voxels']:.0e} target voxels)")
 
         # Validate required parameters
         validate_required_params(params, input_type)

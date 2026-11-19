@@ -24,10 +24,19 @@ from utils import find_seeds, refine_seeds, watershed_again, smooth_region, list
 from resize_tif import convert_tif
 
 
-def compute_auto_dxyz(Lx, Ly, Lz, dx, dy, dz, target_voxels=1e7):
-    """Compute cubic voxel size so the resized image has ~target_voxels total voxels."""
+RESOLUTION_PRESETS = {
+    "normal": 5e7,
+    "high": 2e8,
+}
+
+def compute_auto_dxyz(Lx, Ly, Lz, dx, dy, dz, target_voxels=5e7):
+    """Compute cubic voxel size so the resized image has ~target_voxels total voxels.
+
+    Result is rounded to the nearest 0.1 µm.
+    """
     physical_volume = (Lx * dx) * (Ly * dy) * (Lz * dz)
-    return (physical_volume / target_voxels) ** (1 / 3)
+    dxyz = (physical_volume / target_voxels) ** (1 / 3)
+    return round(dxyz, 1)
 
 
 def detect_input_type(filename):
@@ -147,7 +156,8 @@ def load_and_process_input(filepath, input_type, params):
 
         # Auto-calculate dxyz if not provided
         if dxyz is None:
-            dxyz = compute_auto_dxyz(Lx_raw, Ly_raw, Lz_raw, dx, dy, dz)
+            target_voxels = params.get('target_voxels', 5e7)
+            dxyz = compute_auto_dxyz(Lx_raw, Ly_raw, Lz_raw, dx, dy, dz, target_voxels)
             params['dxyz'] = dxyz
 
         img3d = convert_tif(filepath, dx, dy, dz, dxyz, fluorescent_label, crop_bool)
@@ -190,7 +200,7 @@ def get_default_params(input_type):
     """
     defaults = {
         'tif': {
-            'dxyz': None,             # Auto-calculated to target ~10M voxels
+            'dxyz': None,             # Auto-calculated from resolution preset
             'crop_bool': 0,
             's2v_max': 0.65,          # maximum surface-to-volume ratio of a segmented bead
             'th': 150,                # intensity threshold for bead segmentation

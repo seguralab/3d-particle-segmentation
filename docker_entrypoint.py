@@ -24,6 +24,7 @@ from segmentation_processing import (
     get_default_params,
     validate_required_params,
     run_segmentation,
+    RESOLUTION_PRESETS,
 )
 from resize_tif import get_pixel_and_z_dimensions
 
@@ -71,6 +72,12 @@ def parse_args():
     parser.add_argument("--d-peak", "--d_peak", type=float, help="Min distance between peaks in voxels (auto: radius)")
     parser.add_argument("--inten-max", "--inten_max", type=float, help="Max intensity always foreground (auto: th*3.33)")
     parser.add_argument("--th-relative", "--th_relative", type=float, help="Relative brightness threshold (auto: th/3)")
+
+    # Resolution preset
+    parser.add_argument(
+        "--resolution", choices=["normal", "high"], default="normal",
+        help="Resolution preset: normal (~50M voxels) or high (~200M voxels). Default: normal. Ignored if --dxyz is set.",
+    )
 
     # Output options
     parser.add_argument(
@@ -245,6 +252,10 @@ def main():
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        # Apply resolution preset (only matters when dxyz is auto-calculated)
+        params['target_voxels'] = RESOLUTION_PRESETS[args.resolution]
+        print(f"Resolution: {args.resolution} (~{params['target_voxels']:.0e} target voxels)")
 
         # Load image
         print(f"Loading: {filepath}")

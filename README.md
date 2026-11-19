@@ -121,8 +121,9 @@ docker run \
 | `--dz` | float | Auto-detected | Z-spacing (µm). Auto-detected from TIF `spacing=` metadata if available. Often missing — provide explicitly when possible. |
 | `--input-dir` | string | No | Input directory (default: `./input`) |
 | `--output-dir` | string | No | Output directory (default: `./output`) |
+| `--resolution` | `normal` or `high` | No | Resolution preset (default: `normal`). See [Resolution Presets](#resolution-presets). Ignored if `--dxyz` is set. |
 | `--th` | int | No | Intensity threshold |
-| `--dxyz` | float | No | Resized voxel size (µm) |
+| `--dxyz` | float | No | Explicit resized voxel size (µm). Overrides `--resolution`. |
 | `--s2v-max` | float | No | Max surface-to-volume ratio |
 | `--crop-bool` | 0 or 1 | No | Crop image toggle |
 | `--channel-num` | int | No | Channel number (LIF files) |
@@ -166,6 +167,31 @@ If required parameters are still missing after auto-detection, the process exits
 - Always pass `--fluorescent-label` and `--radius-um` — these are never auto-detected.
 - Pass `--dx`, `--dy`, `--dz` when the user provides them. If omitted, auto-detection will attempt to fill them in.
 - If a job fails with exit code 1, check stderr for the specific missing parameters (e.g., `Missing required parameters: dz`). Surface this to the user so they can provide the missing values and resubmit.
+
+## Resolution Presets
+
+When `--dxyz` is not explicitly provided, the resized voxel size is auto-calculated to target a specific total voxel count. The `--resolution` flag controls this target:
+
+| Preset | Target Voxels | Use Case |
+|--------|--------------|----------|
+| `normal` (default) | ~50 million | Standard segmentation runs |
+| `high` | ~200 million | Higher fidelity segmentation |
+
+The formula computes a uniform cubic voxel size from the image's physical volume:
+
+```
+dxyz = round((physical_volume / target_voxels) ^ (1/3), 1)
+```
+
+The result is rounded to the nearest 0.1 µm, so the actual voxel count will be approximately (not exactly) the target.
+
+**Examples** for a 512x512x200 image with dx=0.155, dy=0.155, dz=1.0 µm:
+- `normal` → dxyz = 0.3 µm
+- `high` → dxyz = 0.1 µm
+
+If `--dxyz` is provided explicitly, `--resolution` is ignored — the explicit value is used as-is.
+
+**Standalone usage:** Set `'resolution': 'high'` in `PARAMS_OPTIONAL` in `segment3d_2.py`.
 
 ## Preview Mode
 
@@ -354,7 +380,7 @@ Parameters are loaded based on input type using `get_default_params()`. Override
 | Parameter | TIF Default | LIF Default | MAT Default | Description |
 |-----------|-------------|-------------|-------------|-------------|
 | `dx`, `dy`, `dz` | 1.1375, 1.1375, 1.0 | 0.66, 0.66, 0.2 | N/A | Original voxel dimensions (µm) |
-| `dxyz` | 1.5 | 0.8 | 2.0 | Resized voxel dimension (µm) |
+| `dxyz` | Auto (see [Resolution Presets](#resolution-presets)) | 0.8 | 2.0 | Resized voxel dimension (µm). Auto-calculated for TIF files, rounded to nearest 0.1 µm. |
 | `fluorescent_label` | 1 | 1 | N/A | 1 = beads labeled, 0 = void space labeled |
 | `crop_bool` | 0 | False | N/A | Whether to crop image |
 | `channel_num` | N/A | 1 | N/A | Channel number for LIF files (1-4) |

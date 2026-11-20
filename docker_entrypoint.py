@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import tifffile
 
 import numpy as np
+from skimage.filters import threshold_otsu
 
 from segmentation_processing import (
     compute_auto_dxyz,
@@ -82,6 +83,13 @@ def parse_args():
     parser.add_argument(
         "--resolution", choices=["normal", "high"], default="normal",
         help="Resolution preset: normal (~50M voxels) or high (~200M voxels). Default: normal. Ignored if --dxyz is set.",
+    )
+
+    # Pre-binarize
+    parser.add_argument(
+        "--binarize", action="store_true",
+        help="Binarize the image using Otsu's method (or --th) before segmentation. "
+             "Converts all pixels to 0 or 255.",
     )
 
     # Output options
@@ -441,6 +449,20 @@ def main():
         total_voxels = img3d.shape[0] * img3d.shape[1] * img3d.shape[2]
         dxyz_source = "auto" if args.dxyz is None else "override"
         print(f"Voxelized shape: {img3d.shape} | dxyz: {params['dxyz']:.4f} µm ({dxyz_source}) | Total voxels: {total_voxels:,}")
+
+        # Auto-threshold via Otsu if --th was not explicitly provided
+        if args.th is None:
+            otsu_th = int(round(threshold_otsu(img3d)))
+            params['th'] = otsu_th
+            print(f"Auto-threshold (Otsu): {otsu_th}")
+        else:
+            print(f"Using user threshold: {params['th']}")
+
+        # Pre-binarize: convert image to 0/255 using the threshold
+        if args.binarize:
+            th_val = params['th']
+            img3d = np.where(img3d > th_val, 255.0, 0.0)
+            print(f"Binarized image at th={th_val}")
 
         # Output options - Docker produces JSON only by default
         output_options = {

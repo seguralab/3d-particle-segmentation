@@ -70,7 +70,26 @@ This maps the useful dynamic range of every sample to a consistent 0–255 scale
 - Already-binarized images (P99=255) are unaffected — the stretch is a no-op
 - For continuous-intensity images, `--th` values will need to be re-tuned once against the normalized scale, but will then be reusable across samples with similar structure
 
-## 4. Threshold Preview Mode
+## 4. Auto-Threshold via Otsu's Method
+
+**File:** `docker_entrypoint.py`
+
+**Problem:** The original pipeline required a manually specified intensity threshold (`--th`), which was highly sample-dependent. The default value of 150 rarely worked across different samples, forcing users into a trial-and-error loop of repeated full segmentation runs.
+
+**Fix:** When `--th` is not provided, the pipeline automatically computes the optimal threshold using Otsu's method (`skimage.filters.threshold_otsu`) on the loaded, normalized 3D volume:
+
+```python
+from skimage.filters import threshold_otsu
+th = int(round(threshold_otsu(img3d)))
+```
+
+Otsu's method finds the threshold that maximally separates foreground from background based on the intensity histogram. Combined with the percentile stretch (Change 3), this produces consistent, automatic binarization across samples without user intervention.
+
+Additionally, a `--binarize` flag converts the entire volume to 0/255 using the threshold (Otsu or `--th`) before segmentation begins. This can be useful for samples where the multi-condition thresholding inside the pipeline produces noisy masks. In practice, for clean fluorescent images, binarization produces identical results to the default pipeline since the internal thresholding already effectively binarizes.
+
+**Result:** Users can run the full pipeline without specifying `--th` at all. The auto-threshold is printed to stdout for transparency. If needed, `--th` can still be passed to override the automatic value.
+
+## 5. Threshold Preview Mode
 
 **Files:** `docker_entrypoint.py`, `segmentation_processing.py` — `generate_threshold_preview()`
 

@@ -122,12 +122,13 @@ docker run \
 | `--input-dir` | string | No | Input directory (default: `./input`) |
 | `--output-dir` | string | No | Output directory (default: `./output`) |
 | `--resolution` | `normal` or `high` | No | Resolution preset (default: `normal`). See [Resolution Presets](#resolution-presets). Ignored if `--dxyz` is set. |
-| `--th` | int | No | Intensity threshold |
+| `--th` | int | No | Intensity threshold. If omitted, automatically computed via Otsu's method after image loading. |
 | `--dxyz` | float | No | Explicit resized voxel size (µm). Overrides `--resolution`. |
 | `--s2v-max` | float | No | Max surface-to-volume ratio |
 | `--crop-bool` | 0 or 1 | No | Crop image toggle |
 | `--channel-num` | int | No | Channel number (LIF files) |
 | `--example-frame` | int | No | Z-slice index for visualization |
+| `--binarize` | flag | No | Binarize the image to 0/255 using the threshold (Otsu or `--th`) before segmentation |
 | `--no-plot` | flag | No | Disable visualization plots |
 | `--no-smooth` | flag | No | Disable morphological smoothing |
 | `--no-png` | flag | No | Disable PNG output |
@@ -317,11 +318,32 @@ The existing `preview_info.json` is updated with two new fields:
 
 **Note:** The `slices` Z-indices reference the raw input dimensions, while `segmented_slices` Z-indices reference the resized volume dimensions. Both use 25/50/75% of their respective Z-depth, so they represent the same anatomical depth despite different absolute indices.
 
+### Auto-Threshold (Otsu)
+
+When `--th` is not provided, the pipeline automatically computes an optimal intensity threshold using [Otsu's method](https://en.wikipedia.org/wiki/Otsu%27s_method) on the loaded (and normalized) 3D volume. This eliminates the need for manual threshold tuning in most cases.
+
+Otsu's method finds the threshold that maximally separates foreground (bright particles) from background (dark regions) based on the intensity histogram. This works well for fluorescent microscopy images, which are typically bimodal.
+
+Combined with the global percentile stretch (P99 → 255), the auto-threshold produces consistent results across samples regardless of acquisition settings (exposure, laser power, gain).
+
+```bash
+# No --th needed — Otsu auto-threshold kicks in
+python docker_entrypoint.py --filename sample.tif --fluorescent-label 1 --radius-um 200 --dz 1
+
+# Override with explicit threshold if needed
+python docker_entrypoint.py --filename sample.tif --fluorescent-label 1 --radius-um 200 --dz 1 --th 133
+```
+
+The auto-computed threshold is printed to stdout:
+```
+Auto-threshold (Otsu): 101
+```
+
 ### Threshold Preview
 
-The `--threshold-preview` flag generates composite comparison images that show how different intensity threshold (`--th`) values affect foreground detection — without running the full segmentation pipeline. This lets you visually pick the right threshold before committing to a 15-30s+ segmentation run.
+The `--threshold-preview` flag generates composite comparison images that show how different intensity threshold (`--th`) values affect foreground detection — without running the full segmentation pipeline. This is useful for validating the auto-threshold or manually exploring alternatives.
 
-**Why:** The `--th` parameter is highly sample-dependent and the default (150) is often wrong. Threshold preview completes in <2 seconds because it only loads 3 individual 2D pages (no full stack, no resize).
+**Why:** While Otsu auto-threshold works well for most samples, edge cases (e.g., semi-translucent particles, high background noise) may benefit from manual tuning. Threshold preview completes in <2 seconds because it only loads 3 individual 2D pages (no full stack, no resize).
 
 **Example invocations:**
 

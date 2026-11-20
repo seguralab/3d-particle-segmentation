@@ -74,16 +74,19 @@ def convert_tif(filename, dx, dy, dz, dxyz, fluorescent_label, crop_bool):
     Lz, Lx, Ly = img_stack.shape
 
     # Create 3-D array of pixel value data
+    # Step 1: Per-slice floor removal (subtract 1st percentile)
     if fluorescent_label == 1: # beads are labeled
         img3d = np.dstack([z - np.percentile(z, 1) for z in img_stack])
     else: # void space is labeled
         img3d = np.dstack([(z - np.percentile(z, 1))*-1 + 255 for z in img_stack])
 
-    # # Create 3D array of binary pixel data directly
-    # if fluorescent_label == 1:  # beads are labeled
-    #     img3d = np.dstack([np.reshape(z, (Lx, Ly), order='F') for z in img_stack])
-    # else:  # void space is labeled
-    #     img3d = np.dstack([255 - np.reshape(z, (Lx, Ly), order='F') for z in img_stack])
+    # Step 2: Global percentile stretch — scale so P99 maps to 255.
+    # This normalizes intensity across samples with different exposure/gain,
+    # making threshold values consistent regardless of acquisition settings.
+    img3d = np.clip(img3d, 0, None)
+    p99 = np.percentile(img3d, 99)
+    if p99 > 0:
+        img3d = img3d / p99 * 255
 
     if crop_bool:
         Lx = round(Lx/2)

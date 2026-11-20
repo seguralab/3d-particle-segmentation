@@ -6,6 +6,7 @@ import numpy as np
 # import json
 from scipy import sparse
 from scipy import ndimage as ndi
+from scipy.spatial import cKDTree
 from scipy.io import savemat, loadmat
 from tqdm import tqdm
 
@@ -15,86 +16,84 @@ from skimage.feature import peak_local_max
 
 
 # %%
-def find_seeds(D, d_peak=np.inf, peak_prom=0):
-    ''' Find initial watershed seeds (local maxima) of D. 
+def find_seeds(D, d_peak=np.inf, peak_prom=0, min_distance=None):
+    ''' Find initial watershed seeds (local maxima) of D.
         Seeds close to other seeds without significant prominences will be removed.
-    Inputs: 
-        D (3D numpy.ndarray of float64, shape = (Lx,Ly,Lz)): 
+    Inputs:
+        D (3D numpy.ndarray of float64, shape = (Lx,Ly,Lz)):
             The distance transform object that watershed will be applied to.
-        d_peak (float): Maximum distance considered for close local maxima. 
-        peak_prom (float): Minimum prominence required for independent local maximum. 
+        d_peak (float): Maximum distance considered for close local maxima.
+        peak_prom (float): Minimum prominence required for independent local maximum.
             For two close local maxima, if the lower local maximum does not have a
             prominence higher than "peak_prom", it will be removed from the seeds.
-    Outputs: 
-        local_maxi (3D numpy.ndarray of uint16, shape = (Lx,Ly,Lz)): 
-            The location and index of seeds. Each nonzero element will be a 
+        min_distance (int or None): Minimum distance between peaks passed to
+            peak_local_max. If None, auto-derived as max(1, int(d_peak / 4)).
+    Outputs:
+        local_maxi (3D numpy.ndarray of uint16, shape = (Lx,Ly,Lz)):
+            The location and index of seeds. Each nonzero element will be a
             watershed seed, and its value will be the watershed label.
     '''
-    # print('Select seeds:')
-    local_maxi_xyz = peak_local_max(D, threshold_abs=3, exclude_border=False) # footprint = np.ones((3, 3)),
+    if min_distance is None:
+        min_distance = max(1, int(d_peak / 4)) if np.isfinite(d_peak) else 1
+    print(f'  peak_local_max min_distance={min_distance}', flush=True)
+
+    local_maxi_xyz = peak_local_max(D, threshold_abs=3, exclude_border=False, min_distance=min_distance)
     # Coordinates of initial local maxima
     xc = local_maxi_xyz[:,0]
     yc = local_maxi_xyz[:,1]
     zc = local_maxi_xyz[:,2]
     n_local = len(xc)
-    ispeak = np.ones(n_local,dtype='bool')
-    if n_local > 100:
-        range_n_local = tqdm(range(n_local))
-    else:
-        range_n_local = range(n_local)
-    for ii in range_n_local:
-        x1 = xc[ii]
-        y1 = yc[ii]
-        z1 = zc[ii]
-        dist2 = (xc-x1)**2 + (yc-y1)**2 + (zc-z1)**2
-        # Local maxima close to the select local maximum 
-        near = (dist2<d_peak**2).nonzero()[0]
-        for jj in near:
-            if jj>ii:
-                x2 = xc[jj]
-                y2 = yc[jj]
-                z2 = zc[jj]
-                xmin = min(x1,x2)
-                xmax = max(x1,x2)
-                ymin = min(y1,y2)
-                ymax = max(y1,y2)
-                zmin = min(z1,z2)
-                zmax = max(z1,z2)
-                # Find the region between to local maxima, resize it to a cube, and extract the diagonal
-                between = D[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
-                leng_resize = max(xmax-xmin+1, ymax-ymin+1, zmax-zmin+1)
-                between_resize = resize(between,(leng_resize,leng_resize,leng_resize))
-                select = np.arange(leng_resize)
-                if x1 < x2:
-                    select_1 = select
-                else:
-                    select_1 = np.flip(select)
-                if y1 < y2:
-                    select_2 = select
-                else:
-                    select_2 = np.flip(select)
-                if z1 < z2:
-                    select_3 = select
-                else:
-                    select_3 = np.flip(select)
-                between_diag = between_resize[select_1,select_2,select_3]
+    print(f'  Initial peaks found: {n_local}', flush=True)
+    ispeak = np.ones(n_local, dtype='bool')
 
-                min_between = between_diag.min()
-                min_end = between_diag[[0,-1]].min()
-                # The square difference between the minimum of the diagonal and the end point
-                sq_dist = np.sqrt(min_end**2 - min_between**2)
-                if sq_dist < peak_prom:
-                    # Exclude the lower local maximim as seeds
-                    if D[x1,y1,z1] < D[x2,y2,z2]:
-                        ispeak[ii] = False
-                    else:
-                        ispeak[jj] = False
+    # Use KD-tree for efficient neighbor search instead of O(n^2) brute force
+    coords = np.column_stack([xc, yc, zc]).astype(np.float64)
+    tree = cKDTree(coords)
+    pairs = tree.query_pairs(d_peak, output_type='ndarray')
+    n_pairs = len(pairs)
+    print(f'  Close pairs to evaluate: {n_pairs}', flush=True)
 
-    local_maxi = np.zeros(D.shape,dtype = 'uint16')
+    log_interval = max(1, n_pairs // 20)
+    for idx in range(n_pairs):
+        if idx % log_interval == 0 and idx > 0:
+            print(f'  Evaluating pair {idx}/{n_pairs} ({100*idx//n_pairs}%)', flush=True)
+        ii, jj = pairs[idx]
+        x1, y1, z1 = xc[ii], yc[ii], zc[ii]
+        x2, y2, z2 = xc[jj], yc[jj], zc[jj]
+        xmin = min(x1, x2)
+        xmax = max(x1, x2)
+        ymin = min(y1, y2)
+        ymax = max(y1, y2)
+        zmin = min(z1, z2)
+        zmax = max(z1, z2)
+        # Find the region between two local maxima, resize it to a cube, and extract the diagonal
+        between = D[xmin:xmax+1, ymin:ymax+1, zmin:zmax+1]
+        leng_resize = max(xmax-xmin+1, ymax-ymin+1, zmax-zmin+1)
+        between_resize = resize(between, (leng_resize, leng_resize, leng_resize))
+        select = np.arange(leng_resize)
+        select_1 = select if x1 < x2 else np.flip(select)
+        select_2 = select if y1 < y2 else np.flip(select)
+        select_3 = select if z1 < z2 else np.flip(select)
+        between_diag = between_resize[select_1, select_2, select_3]
+
+        min_between = between_diag.min()
+        min_end = between_diag[[0,-1]].min()
+        # The square difference between the minimum of the diagonal and the end point
+        sq_dist = np.sqrt(min_end**2 - min_between**2)
+        if sq_dist < peak_prom:
+            # Exclude the lower local maximum as seeds
+            if D[x1, y1, z1] < D[x2, y2, z2]:
+                ispeak[ii] = False
+            else:
+                ispeak[jj] = False
+
+    local_maxi = np.zeros(D.shape, dtype='uint16')
     index = ispeak.nonzero()[0]
-    for (ii,ind) in enumerate(index):
-        local_maxi[xc[ind],yc[ind],zc[ind]] = ii+1
+    for (ii, ind) in enumerate(index):
+        local_maxi[xc[ind], yc[ind], zc[ind]] = ii+1
 
+    n_seeds = len(index)
+    print(f'  Seeds after pruning: {n_seeds}', flush=True)
     return local_maxi
 
 

@@ -22,6 +22,7 @@ import tifffile
 
 from utils import find_seeds, refine_seeds, watershed_again, smooth_region, list_sparse
 from resize_tif import convert_tif
+from progress import ProgressReporter
 
 
 RESOLUTION_PRESETS = {
@@ -225,7 +226,65 @@ def get_default_params(input_type):
     return defaults.get(input_type, {})
 
 
-def run_segmentation(img3d, filename, params, output_options):
+def generate_threshold_preview(slice_2d, threshold_values, slice_label, output_dir):
+    """Generate a composite comparison image showing raw slice + binary masks at each threshold.
+
+    Parameters
+    ----------
+    slice_2d : ndarray (2D, float)
+        Normalized 2D slice (after percentile subtraction and clipping).
+    threshold_values : list of int/float
+        Candidate threshold values to visualize.
+    slice_label : str
+        Depth label ("25", "50", or "75") used in filenames.
+    output_dir : str
+        Directory to save the composite PNG.
+
+    Returns
+    -------
+    dict
+        Metadata: {"name": filename, "thresholds": [{"value": v, "foreground_pct": pct}, ...]}
+    """
+    n_th = len(threshold_values)
+    fig, axes = plt.subplots(1, n_th + 1, figsize=(4 * (n_th + 1), 4))
+
+    # Raw grayscale panel
+    axes[0].imshow(slice_2d, cmap='gray')
+    axes[0].set_title('Raw', fontsize=10)
+    axes[0].axis('off')
+
+    threshold_meta = []
+    for i, th_val in enumerate(threshold_values):
+        ax = axes[i + 1]
+        mask = slice_2d > th_val
+        total_pixels = slice_2d.size
+        fg_pct = 100.0 * mask.sum() / total_pixels if total_pixels > 0 else 0.0
+
+        # Green overlay: show raw image with green tint where mask is True
+        rgb = np.stack([slice_2d, slice_2d, slice_2d], axis=-1)
+        rgb = rgb / (rgb.max() + 1e-8)  # normalize to [0,1]
+        rgb = np.clip(rgb, 0, 1)
+        # Tint foreground pixels green
+        overlay = rgb.copy()
+        overlay[mask, 0] *= 0.3
+        overlay[mask, 1] = np.clip(overlay[mask, 1] * 0.5 + 0.5, 0, 1)
+        overlay[mask, 2] *= 0.3
+
+        ax.imshow(overlay)
+        ax.set_title(f'th={int(th_val)} ({fg_pct:.1f}% fg)', fontsize=9)
+        ax.axis('off')
+
+        threshold_meta.append({"value": int(th_val), "foreground_pct": round(fg_pct, 2)})
+
+    fig.tight_layout(pad=0.5)
+    filename_out = f'threshold_preview_{slice_label}.png'
+    fig.savefig(os.path.join(output_dir, filename_out), dpi=100, bbox_inches='tight')
+    plt.close(fig)
+
+    return {"name": filename_out, "thresholds": threshold_meta}
+
+
+def run_segmentation(img3d, filename, params, output_options, progress=None):
     """
     Run the full 3D particle segmentation pipeline.
     
@@ -268,6 +327,9 @@ def run_segmentation(img3d, filename, params, output_options):
     output_dir = os.path.join('output', name)
     os.makedirs(output_dir, exist_ok=True)
     
+    if progress is None:
+        progress = ProgressReporter()
+
     # Derived parameters (auto-calculated unless overridden)
     voxel_size = dxyz
     radius = radius_um / voxel_size
@@ -275,6 +337,10 @@ def run_segmentation(img3d, filename, params, output_options):
     d_peak = params.get('d_peak', radius)
     inten_max = params.get('inten_max', th * 3.33)
     th_relative = params.get('th_relative', th / 3)
+    min_distance = params.get('min_distance', max(1, int(d_peak / 4)))
+
+    print(f'Derived params: radius={radius:.1f} vox, d_peak={d_peak:.1f}, '
+          f'peak_prom={peak_prom:.1f}, min_distance={min_distance}', flush=True)
     
     # Output file paths
     file_output = os.path.join(output_dir, f'{name}_segment_{th}.mat')
@@ -306,14 +372,14 @@ def run_segmentation(img3d, filename, params, output_options):
     
     # %% 1. Threshold to binary
     start = time.time()
-    print('Thresholding...', flush=True)
+    progress.report('Thresholding...')
     img3d_mean3 = ndi.uniform_filter(img3d, 3).astype('int16')
     img3d_mean5 = ndi.uniform_filter(img3d, 5).astype('int16')
     diff_mean = img3d_mean3 - img3d_mean5
     bw = np.logical_or(np.logical_and(img3d > th, diff_mean > -th_relative), img3d > inten_max)
 
     # %% 2. Distance transform
-    print('Distance transform...', flush=True)
+    progress.report('Distance transform...')
     yz_proj = img3d.max(axis=0)
     empty = yz_proj < 1
     if empty.sum() < Lx:
@@ -329,13 +395,13 @@ def run_segmentation(img3d, filename, params, output_options):
     D = ndi.distance_transform_edt(bw_data) * bw
 
     # %% 3. Find initial watershed seeds
-    print('Finding seeds...', flush=True)
-    local_maxi = find_seeds(D, d_peak, peak_prom)
+    progress.report('Finding seeds...')
+    local_maxi = find_seeds(D, d_peak, peak_prom, min_distance=min_distance)
     seed_select = time.time()
     print(f'Seed selection: {seed_select - start:.2f} s')
 
     # %% 4. Initial watershed
-    print('Initial watershed...', flush=True)
+    progress.report('Initial watershed...')
     labels = watershed(-D, markers=local_maxi, mask=bw, watershed_line=False, connectivity=1)
     if does_plot:
         plt.figure()
@@ -352,13 +418,13 @@ def run_segmentation(img3d, filename, params, output_options):
     print(f'Initial watershed: {watershed_1 - seed_select:.2f} s')
     
     # %% 5. Refine watershed seeds
-    print('Refining seeds...', flush=True)
+    progress.report('Refining seeds...')
     local_maxi = refine_seeds(labels, local_maxi, empty_ext, s2v_max, footprint_direct, footprint_indirect)
     seed_refine = time.time()
     print(f'Seed refinement: {seed_refine - watershed_1:.2f} s')
 
     # %% 6. Second watershed
-    print('Second watershed...', flush=True)
+    progress.report('Second watershed...')
     labels = watershed(-D, markers=local_maxi, mask=bw, watershed_line=False, connectivity=2)
     watershed_2 = time.time()
     print(f'Second watershed: {watershed_2 - seed_refine:.2f} s')
@@ -375,6 +441,7 @@ def run_segmentation(img3d, filename, params, output_options):
         plt.close()
     
     # %% 7. Further cut segmented regions
+    progress.report('Watershed refinement...')
     list_labels_2 = watershed_again(labels, local_maxi, d_peak, peak_prom, empty_ext, s2v_max, footprint_direct, footprint_indirect)
     list_voxel_count = np.array([label_2.sum() for label_2 in list_labels_2])
     order = list_voxel_count.argsort() + 1
@@ -402,6 +469,7 @@ def run_segmentation(img3d, filename, params, output_options):
     print(f'Watershed refine: {watershed_3 - watershed_2:.2f} s')
     
     # %% 8. Smooth segmented regions
+    progress.report('Smoothing...')
     if further_smooth:
         for (ii, label_2) in tqdm(enumerate(list_labels_2), desc='Smoothing regions'):
             labels = smooth_region(label_2.toarray().reshape(Lx, Ly, Lz), footprint_neighbor)
@@ -471,6 +539,7 @@ def run_segmentation(img3d, filename, params, output_options):
     print(f"Segmented previews saved to {preview_dir}")
 
     # %% Final: Convert to JSON format
+    progress.report('Converting to JSON...')
     (list_bead_voxel_count, list_bead_data) = list_sparse(list_labels_2, (Lx, Ly, Lz))
     bead_count = len(list_bead_voxel_count)
     order = order.tolist()

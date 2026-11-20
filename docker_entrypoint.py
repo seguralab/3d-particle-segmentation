@@ -18,9 +18,12 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import tifffile
 
+import numpy as np
+
 from segmentation_processing import (
     compute_auto_dxyz,
     detect_input_type,
+    generate_threshold_preview,
     load_and_process_input,
     get_default_params,
     validate_required_params,
@@ -28,6 +31,7 @@ from segmentation_processing import (
     RESOLUTION_PRESETS,
 )
 from resize_tif import get_pixel_and_z_dimensions
+from progress import ProgressReporter
 
 
 def parse_args():
@@ -95,6 +99,32 @@ def parse_args():
     parser.add_argument(
         "--preview-only", action="store_true",
         help="Load, validate, and save preview slices without running segmentation",
+    )
+
+    # Threshold preview mode
+    parser.add_argument(
+        "--threshold-preview", action="store_true",
+        help="Generate threshold comparison images for representative slices and exit without segmentation",
+    )
+    parser.add_argument(
+        "--threshold-values",
+        type=str,
+        default=None,
+        help="Comma-separated threshold values for threshold preview (e.g. '100,130,150,170,200')",
+    )
+
+    # Progress / heartbeat reporting
+    parser.add_argument(
+        "--progress-url", default=None,
+        help="Heartbeat endpoint URL (e.g. http://wrapperapi:8080/heartbeat)",
+    )
+    parser.add_argument(
+        "--progress-header", default=None,
+        help="Auth header as name:value (e.g. X-Heartbeat-Token:abc123)",
+    )
+    parser.add_argument(
+        "--job-id", default=None,
+        help="Job identifier sent with heartbeat messages",
     )
 
     return parser.parse_args()
@@ -261,6 +291,130 @@ def main():
                 json.dump(preview_info, f, indent=2)
 
             print(f"Preview saved to {preview_dir}")
+            if not args.threshold_preview:
+                sys.exit(0)
+
+        # Threshold preview mode: generate composite comparison images and exit.
+        if args.threshold_preview:
+            name = Path(args.filename).stem
+            preview_dir = os.path.join('output', name, 'previews')
+            os.makedirs(preview_dir, exist_ok=True)
+
+            fluorescent_label = params.get('fluorescent_label', 1)
+
+            # Load 3 representative raw pages and normalize
+            slice_specs = []
+            normalized_slices = []
+
+            if input_type == 'tif':
+                with tifffile.TiffFile(filepath) as tif:
+                    Lz = len(tif.pages)
+                    page_shape = tif.pages[0].shape
+                    if len(page_shape) != 2:
+                        print(
+                            f"Error: TIF has {len(page_shape)+1}D pages (shape={page_shape}). "
+                            "Multi-channel TIF files are not supported.",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+
+                    for label_str, z_idx in [("25", Lz // 4), ("50", Lz // 2), ("75", 3 * Lz // 4)]:
+                        page_data = tif.pages[z_idx].asarray().astype(np.float64)
+                        # Normalize per-slice matching pipeline logic (resize_tif.py:77-80)
+                        if fluorescent_label == 1:
+                            normed = page_data - np.percentile(page_data, 1)
+                        else:
+                            normed = (page_data - np.percentile(page_data, 1)) * -1 + 255
+                        normed = np.clip(normed, 0, None)
+                        slice_specs.append((label_str, z_idx))
+                        normalized_slices.append(normed)
+            else:
+                # Non-TIF: fall back to full load
+                img3d = load_and_process_input(filepath, input_type, params)
+                Lz = img3d.shape[2]
+                for label_str, z_idx in [("25", Lz // 4), ("50", Lz // 2), ("75", 3 * Lz // 4)]:
+                    normed = img3d[:, :, z_idx].astype(np.float64)
+                    normed = np.clip(normed, 0, None)
+                    slice_specs.append((label_str, z_idx))
+                    normalized_slices.append(normed)
+
+            # Percentile stretch: scale so P99 across all slices maps to 255.
+            # This makes threshold values consistent regardless of sample brightness.
+            all_pixels = np.concatenate([s.ravel() for s in normalized_slices])
+            p99 = np.percentile(all_pixels, 99)
+            if p99 > 0:
+                normalized_slices = [np.clip(s / p99 * 255, 0, 255) for s in normalized_slices]
+                print(f"Percentile stretch: P99={p99:.1f} → mapped to 255")
+
+            # Determine candidate thresholds
+            if args.threshold_values:
+                threshold_values = [int(v.strip()) for v in args.threshold_values.split(',')]
+                threshold_source = "user_specified"
+            elif args.th is not None:
+                th = args.th
+                threshold_values = [
+                    int(round(0.7 * th)),
+                    int(round(0.85 * th)),
+                    th,
+                    int(round(1.15 * th)),
+                    int(round(1.3 * th)),
+                ]
+                threshold_source = "auto_from_th"
+            else:
+                # Auto from intensity percentiles of nonzero pixels across all slices
+                all_nonzero = np.concatenate([s[s > 0].ravel() for s in normalized_slices])
+                if len(all_nonzero) > 0:
+                    threshold_values = [
+                        int(round(np.percentile(all_nonzero, p))) for p in [70, 80, 88, 93, 97]
+                    ]
+                else:
+                    threshold_values = [50, 100, 150, 200, 250]
+                threshold_source = "auto_from_percentiles"
+
+            # Remove duplicate thresholds while preserving order
+            seen = set()
+            unique_thresholds = []
+            for v in threshold_values:
+                if v not in seen:
+                    seen.add(v)
+                    unique_thresholds.append(v)
+            threshold_values = unique_thresholds
+
+            print(f"Threshold preview: {threshold_values} (source: {threshold_source})")
+
+            # Generate composite images for each slice
+            slice_metadata = []
+            for (label_str, z_idx), normed in zip(slice_specs, normalized_slices):
+                meta = generate_threshold_preview(normed, threshold_values, label_str, preview_dir)
+                meta["z_index"] = int(z_idx)
+                meta["foreground_pcts"] = [t["foreground_pct"] for t in meta["thresholds"]]
+                slice_metadata.append(meta)
+
+            # Update preview_info.json
+            preview_info_path = os.path.join(preview_dir, 'preview_info.json')
+            if os.path.exists(preview_info_path):
+                with open(preview_info_path, 'r') as f:
+                    preview_info = json.load(f)
+            else:
+                preview_info = {"filename": args.filename}
+
+            preview_info["threshold_preview"] = {
+                "thresholds": threshold_values,
+                "threshold_source": threshold_source,
+                "slices": [
+                    {
+                        "name": m["name"],
+                        "z_index": m["z_index"],
+                        "foreground_pcts": m["foreground_pcts"],
+                    }
+                    for m in slice_metadata
+                ],
+            }
+
+            with open(preview_info_path, 'w') as f:
+                json.dump(preview_info, f, indent=2)
+
+            print(f"Threshold preview saved to {preview_dir}")
             sys.exit(0)
 
         # Validate required parameters (full segmentation needs all of them)
@@ -297,8 +451,24 @@ def main():
             "save_json": True,
         }
 
+        # Build progress reporter
+        auth_header = None
+        if args.progress_header:
+            name_val = args.progress_header.split(":", 1)
+            if len(name_val) == 2:
+                auth_header = (name_val[0], name_val[1])
+        if auth_header is None:
+            token = os.environ.get("HEARTBEAT_TOKEN")
+            if token:
+                auth_header = ("X-Heartbeat-Token", token)
+        progress = ProgressReporter(
+            url=args.progress_url,
+            job_id=args.job_id,
+            auth_header=auth_header,
+        )
+
         # Run pipeline
-        run_segmentation(img3d, args.filename, params, output_options)
+        run_segmentation(img3d, args.filename, params, output_options, progress=progress)
     finally:
         print(f"Total workflow runtime: {time.perf_counter() - workflow_start:.2f} s")
 

@@ -134,6 +134,11 @@ docker run \
 | `--no-mat` | flag | No | Disable MAT output |
 | `--no-json` | flag | No | Disable JSON output |
 | `--preview-only` | flag | No | Validate input and save preview slices without running segmentation (see [Preview Mode](#preview-mode)) |
+| `--threshold-preview` | flag | No | Generate threshold comparison images and exit (see [Threshold Preview](#threshold-preview)) |
+| `--threshold-values` | string | No | Comma-separated threshold values for threshold preview (e.g. `"100,130,150,170,200"`) |
+| `--progress-url` | string | No | Heartbeat endpoint URL for progress reporting (e.g. `http://wrapperapi:8080/heartbeat`). If omitted, progress is only printed to stdout. |
+| `--progress-header` | string | No | Auth header as `name:value` (e.g. `X-Heartbeat-Token:abc123`). Also reads `HEARTBEAT_TOKEN` env var as fallback. |
+| `--job-id` | string | No | Job identifier sent with heartbeat messages |
 
 Any parameter you don't specify uses the default for the detected file type (see [Main Parameters](#main-parameters) below).
 
@@ -312,6 +317,112 @@ The existing `preview_info.json` is updated with two new fields:
 
 **Note:** The `slices` Z-indices reference the raw input dimensions, while `segmented_slices` Z-indices reference the resized volume dimensions. Both use 25/50/75% of their respective Z-depth, so they represent the same anatomical depth despite different absolute indices.
 
+### Threshold Preview
+
+The `--threshold-preview` flag generates composite comparison images that show how different intensity threshold (`--th`) values affect foreground detection — without running the full segmentation pipeline. This lets you visually pick the right threshold before committing to a 15-30s+ segmentation run.
+
+**Why:** The `--th` parameter is highly sample-dependent and the default (150) is often wrong. Threshold preview completes in <2 seconds because it only loads 3 individual 2D pages (no full stack, no resize).
+
+**Example invocations:**
+
+```bash
+# Auto-pick thresholds spread around --th 150
+docker run \
+  -v /data/input:/app/input \
+  -v /data/output:/app/output \
+  ghcr.io/seguralab/3d-particle-segmentation:latest \
+  --filename sample.tif \
+  --fluorescent-label 1 \
+  --th 150 \
+  --threshold-preview
+
+# Auto-pick thresholds from intensity percentiles (no --th)
+python docker_entrypoint.py --filename sample.tif --fluorescent-label 1 --threshold-preview
+
+# Specify exact threshold values to compare
+python docker_entrypoint.py --filename sample.tif --fluorescent-label 1 \
+  --threshold-preview --threshold-values "100,130,150,170,200"
+
+# Combine with --preview-only to get both raw input slices and threshold previews
+python docker_entrypoint.py --filename sample.tif --fluorescent-label 1 \
+  --preview-only --threshold-preview --th 150
+```
+
+**Auto-threshold selection:**
+
+- If `--th` is provided, 5 candidates spread around it: `[0.7×th, 0.85×th, th, 1.15×th, 1.3×th]`
+- If `--th` is not provided, candidates are derived from intensity percentiles of the loaded slices: `[P70, P80, P88, P93, P97]` of nonzero pixels
+- If `--threshold-values` is provided, those exact values are used
+
+**Output structure:**
+
+```
+output/{stem}/previews/
+├── threshold_preview_25.png        # Composite comparison at 25% depth
+├── threshold_preview_50.png        # Composite comparison at 50% depth
+├── threshold_preview_75.png        # Composite comparison at 75% depth
+└── preview_info.json               # Updated with threshold_preview section
+```
+
+Each `threshold_preview_*.png` is a wide composite image with the raw grayscale slice on the left and green-overlay binary masks for each candidate threshold, labeled with the value and foreground percentage.
+
+**preview_info.json additions:**
+
+```json
+{
+  "threshold_preview": {
+    "thresholds": [105, 128, 150, 173, 195],
+    "threshold_source": "auto_from_th",
+    "slices": [
+      {
+        "name": "threshold_preview_25.png",
+        "z_index": 20,
+        "foreground_pcts": [54.8, 25.1, 14.4, 5.0, 1.4]
+      },
+      {
+        "name": "threshold_preview_50.png",
+        "z_index": 40,
+        "foreground_pcts": [52.3, 23.8, 13.1, 4.5, 1.1]
+      },
+      {
+        "name": "threshold_preview_75.png",
+        "z_index": 60,
+        "foreground_pcts": [49.1, 22.0, 12.0, 3.9, 0.9]
+      }
+    ]
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `thresholds` | List of candidate threshold values used |
+| `threshold_source` | How thresholds were chosen: `"auto_from_th"`, `"auto_from_percentiles"`, or `"user_specified"` |
+| `slices[].foreground_pcts` | Percentage of pixels above each threshold (same order as `thresholds`) |
+
+## Progress Reporting
+
+The pipeline prints progress messages to stdout at each major step (thresholding, distance transform, finding seeds, watershed, etc.). When `--progress-url` is provided, these messages are also POSTed to the given endpoint as form data (`jobId=<id>&desc=<message>`).
+
+**Local usage:** Without `--progress-url`, the reporter is a no-op — no network calls are made. Progress is printed to stdout only.
+
+**Docker / API usage:**
+
+```bash
+docker run \
+  -e HEARTBEAT_TOKEN=abc123 \
+  -v /data/input:/app/input \
+  -v /data/output:/app/output \
+  ghcr.io/seguralab/3d-particle-segmentation:latest \
+  --filename sample.tif \
+  --progress-url http://wrapperapi:8080/heartbeat \
+  --job-id 12345
+```
+
+The `HEARTBEAT_TOKEN` env var sets the `X-Heartbeat-Token` header automatically. Alternatively, use `--progress-header "X-Heartbeat-Token:abc123"` for explicit header control.
+
+Heartbeat failures are logged to stderr but never crash the pipeline.
+
 ## Exit Codes
 
 | Code | Meaning | Stderr Output |
@@ -345,7 +456,8 @@ The segmentation workflow follows these steps:
    - Handles image boundaries to avoid artificial edge detection
 
 ### 4. **Seed Detection** (Step 1)
-   - Finds local maxima in the distance transform
+   - Finds local maxima in the distance transform using `min_distance` to filter trivially close peaks (auto-derived as `d_peak / 4`)
+   - Uses KD-tree for efficient O(n log n) neighbor search when evaluating close peak pairs
    - Removes low-prominence peaks using `peak_prom`
    - Merges closely-spaced peaks using `d_peak`
 
@@ -465,10 +577,11 @@ Loads and preprocesses the input image based on its type.
 Provides sensible default parameters for each input type.
 - Returns: Dictionary of parameters
 
-### `run_segmentation(img3d, filename, params, output_options)`
+### `run_segmentation(img3d, filename, params, output_options, progress=None)`
 Executes the complete segmentation pipeline.
 - Performs all 10 steps of processing
 - Saves outputs to `output/{filename}/`
+- Optionally accepts a `ProgressReporter` instance for heartbeat reporting
 
 Lower-level segmentation utilities are in utils.py
 
@@ -478,7 +591,8 @@ Lower-level segmentation utilities are in utils.py
 ├── segment3d_2.py              # Standalone entry point - edit config at top of file
 ├── docker_entrypoint.py        # Docker/CLI entry point - accepts args via command line
 ├── segmentation_processing.py  # All processing functions and utilities
-├── utils.py                    # Lower-level segmentation utilities
+├── utils.py                    # Lower-level segmentation utilities (seed detection, watershed, smoothing)
+├── progress.py                # Lightweight HTTP progress/heartbeat reporter
 ├── resize_tif.py              # TIF image loading and resizing
 ├── resize_confocal.m           # MATLAB preprocessing for confocal images
 ├── resize_SCAPE.m             # MATLAB preprocessing for SCAPE images
